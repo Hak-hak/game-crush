@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Word Puzzle Crush</title>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+    <style>
+        :root {
+            --board-width: 12;
+            --board-height: 10;
+            --cell-size: 60px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 15px;
+            box-sizing: border-box;
+        }
+
+        .game-wrapper {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 25px;
+        }
+
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            color: #1d2129;
+            margin-bottom: 20px;
+        }
+
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(var(--board-width), var(--cell-size));
+            grid-template-rows: repeat(var(--board-height), var(--cell-size));
+            gap: 5px;
+            background-color: #ccd0d5;
+            padding: 10px;
+            border-radius: 12px;
+        }
+
+        #game-board div {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+            border-radius: 50%;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+            text-align: center;
+            padding: 2px;
+            box-shadow: inset 0 -4px 0 rgba(0,0,0,0.2);
+        }
+        
+        #game-board div.empty {
+            background-color: transparent !important;
+            box-shadow: none;
+            cursor: default;
+        }
+
+        #game-board div.selected {
+            transform: scale(1.15);
+            z-index: 10;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            background-color: #ffdf70;
+        }
+        
+        #game-board div.invalid {
+            animation: shake 0.4s ease;
+        }
+
+        #game-board div.matched {
+            animation: blinking-match 3s forwards;
+            z-index: 5;
+        }
+        
+        #game-board div.hint-blink {
+            animation: hint-pulse 1.5s infinite ease-in-out;
+        }
+
+        @keyframes blinking-match {
+            0%, 20%, 40%, 60% { transform: scale(1.1); background-color: #28a745 !important; }
+            10%, 30%, 50%, 70% { transform: scale(1); }
+            80% { transform: scale(1.1); background-color: #28a745 !important; opacity: 1; }
+            100% { transform: scale(0); opacity: 0; }
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        
+        @keyframes hint-pulse {
+            0% { box-shadow: inset 0 -4px 0 rgba(0,0,0,0.2), 0 0 5px rgba(255,165,0,0.5); }
+            50% { box-shadow: inset 0 -4px 0 rgba(0,0,0,0.2), 0 0 20px rgba(255,165,0,1); }
+            100% { box-shadow: inset 0 -4px 0 rgba(0,0,0,0.2), 0 0 5px rgba(255,165,0,0.5); }
+        }
+        
+        .sidebar {
+            width: 280px; padding: 20px; background-color: #fff; border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .sidebar h2 { margin-top: 0; color: #343a40; text-align: center; }
+        .sidebar ul { list-style-type: none; padding: 0; margin: 0; max-height: 520px; overflow-y: auto; }
+        .sidebar li { margin-bottom: 8px; padding: 8px 12px; border-radius: 6px; font-size: 14px; transition: all 0.5s ease; background-color: #f8f9fa; }
+        .sidebar li.found { text-decoration: line-through; background-color: #e2f0e5; color: #6c757d; }
+
+        #win-message { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); justify-content: center; align-items: center; z-index: 1000; }
+        #win-message div { padding: 40px 60px; background-color: white; border-radius: 20px; text-align: center; animation: win-popup 0.5s ease; cursor: pointer; }
+        #win-message h2 { font-size: 3rem; color: #28a745; margin: 0; }
+        @keyframes win-popup { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div class="game-wrapper">
+        <div class="game-container">
+            <h1>Word Puzzle Crush</h1>
+            <div id="game-board"></div>
+        </div>
+        <div class="sidebar">
+            <h2>Cụm từ cần tìm</h2>
+            <ul id="phrase-list"></ul>
+        </div>
+    </div>
+    <div id="win-message">
+        <div>
+            <h2>You Win!</h2>
+            <p>(Nhấp để chơi lại)</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const gameBoard = document.getElementById('game-board');
+            const phraseListUl = document.getElementById('phrase-list');
+            const winMessage = document.getElementById('win-message');
+            const config = { width: 12, height: 10 };
+            const cells = [];
+            let selectedCell = null;
+            let isProcessing = false;
+            let hintTimer = null;
+            
+            const targetPhrases = [
+                "walk the dog", "make the bed", "ride a bike", "have a bath", 
+                "brush my teeth", "read a book", "play the guitar", "go to school", 
+                "wash the car", "wake up early", "have a big dinner", "I play football", 
+                "clean the house", "have a shower", "watch TV a lot", "listen to music", 
+                "I get dressed", "take the bus", "do my homework", "water the plants"
+            ];
+            
+            let foundPhrases = [];
+            const allWords = [...new Set(targetPhrases.join(" ").split(" "))];
+
+            const colorPalette = ["#e74c3c", "#3498db", "#2ecc71", "#9b59b6", "#f1c40f", "#1abc9c", "#e67e22", "#d35400", "#c0392b", "#2980b9", "#27ae60", "#8e44ad", "#f39c12", "#16a085", "#d35400", "#7f8c8d", "#2c3e50", "#d63031", "#0984e3", "#00b894"];
+            const phraseColorMap = new Map();
+            targetPhrases.forEach((phrase, index) => {
+                phraseColorMap.set(phrase, colorPalette[index % colorPalette.length]);
+            });
+
+            function resetGame() {
+                clearTimeout(hintTimer);
+                foundPhrases = [];
+                selectedCell = null;
+                isProcessing = false;
+                gameBoard.innerHTML = '';
+                cells.length = 0;
+                winMessage.style.display = 'none';
+                init();
+            }
+            
+            function init() {
+                phraseListUl.innerHTML = targetPhrases.map(p => `<li data-phrase="${p}">${p}</li>`).join('');
+                createPuzzleBoard();
+                winMessage.addEventListener('click', handleWinClick);
+                startHintTimer();
+            }
+            
+            function startHintTimer() {
+                clearTimeout(hintTimer);
+                hintTimer = setTimeout(showHint, 50000); // 50 giây
+            }
+            
+            function resetHint() {
+                cells.forEach(cell => cell.classList.remove('hint-blink'));
+            }
+
+            function showHint() {
+                for (let i = 0; i < cells.length; i++) {
+                    const cell1 = cells[i];
+                    if (cell1.classList.contains('empty')) continue;
+
+                    const neighbors = [i + 1, i - 1, i + config.width, i - config.width]
+                        .filter(index => index >= 0 && index < cells.length && isAdjacent(i, index));
+                    
+                    for (const neighborIndex of neighbors) {
+                        const cell2 = cells[neighborIndex];
+                        if (cell2.classList.contains('empty')) continue;
+                        if (isValidSwap(cell1, cell2)) {
+                            cell1.classList.add('hint-blink');
+                            cell2.classList.add('hint-blink');
+                            return; 
+                        }
+                    }
+                }
+            }
+
+            function createPuzzleBoard() {
+                const boardSize = config.width * config.height;
+                const boardData = Array(boardSize).fill(null);
+                for (const phraseStr of targetPhrases) {
+                    const phrase = phraseStr.split(' ');
+                    let placed = false;
+                    for (let attempts = 0; attempts < 100 && !placed; attempts++) {
+                        const isHorizontal = Math.random() > 0.5;
+                        let r, c, startIndex;
+                        if (isHorizontal) {
+                            r = Math.floor(Math.random() * config.height);
+                            c = Math.floor(Math.random() * (config.width - phrase.length + 1));
+                            startIndex = r * config.width + c;
+                        } else {
+                            r = Math.floor(Math.random() * (config.height - phrase.length + 1));
+                            c = Math.floor(Math.random() * config.width);
+                            startIndex = r * config.width + c;
+                        }
+                        let canPlace = true;
+                        for (let i = 0; i < phrase.length; i++) {
+                            const index = isHorizontal ? startIndex + i : startIndex + i * config.width;
+                            if (boardData[index] !== null) canPlace = false;
+                        }
+                        if (!canPlace) continue;
+                        for (let i = 0; i < phrase.length; i++) {
+                            const index = isHorizontal ? startIndex + i : startIndex + i * config.width;
+                            boardData[index] = { word: phrase[i], phrase: phraseStr };
+                        }
+                        const wordIndexInPhrase = Math.floor(Math.random() * phrase.length);
+                        const cellIndexToSwap = isHorizontal ? startIndex + wordIndexInPhrase : startIndex + wordIndexInPhrase * config.width;
+                        const adjacentIndices = [cellIndexToSwap - 1, cellIndexToSwap + 1, cellIndexToSwap - config.width, cellIndexToSwap + config.width]
+                           .filter(idx => {
+                               if (idx < 0 || idx >= boardSize || boardData[idx] !== null) return false;
+                               const originalRow = Math.floor(cellIndexToSwap / config.width); const newRow = Math.floor(idx / config.width);
+                               const originalCol = cellIndexToSwap % config.width; const newCol = idx % config.width;
+                               return Math.abs(originalRow - newRow) + Math.abs(originalCol - newCol) === 1;
+                           });
+                        if (adjacentIndices.length > 0) {
+                            const adjacentIndex = adjacentIndices[Math.floor(Math.random() * adjacentIndices.length)];
+                            [boardData[cellIndexToSwap], boardData[adjacentIndex]] = [boardData[adjacentIndex], boardData[cellIndexToSwap]];
+                        }
+                        placed = true;
+                    }
+                }
+                for (let i = 0; i < boardSize; i++) {
+                    if (boardData[i] === null) {
+                        boardData[i] = { word: allWords[Math.floor(Math.random() * allWords.length)], phrase: null };
+                    }
+                }
+                for (let i = 0; i < boardSize; i++) {
+                    const cell = document.createElement('div');
+                    cell.dataset.index = i;
+                    updateCell(cell, boardData[i]);
+                    cell.addEventListener('click', handleCellClick);
+                    gameBoard.appendChild(cell);
+                    cells.push(cell);
+                }
+            }
+            
+            function updateCell(cell, data) {
+                if (!data || !data.word) {
+                    cell.textContent = ''; cell.style.backgroundColor = 'transparent'; cell.dataset.phrase = '';
+                    cell.classList.add('empty');
+                } else {
+                    cell.textContent = data.word; cell.dataset.phrase = data.phrase || '';
+                    cell.style.backgroundColor = data.phrase ? phraseColorMap.get(data.phrase) : colorPalette[Math.floor(Math.random() * colorPalette.length)];
+                    cell.classList.remove('empty');
+                }
+            }
+
+            /**
+             * THAY ĐỔI QUAN TRỌNG: Đặt lại bộ đếm thời gian mỗi khi người dùng nhấp chuột
+             */
+            function handleCellClick(event) {
+                if (isProcessing) return;
+
+                // Reset gợi ý và khởi động lại bộ đếm ngay khi có thao tác
+                resetHint();
+                startHintTimer();
+
+                const clickedCell = event.target;
+                if (clickedCell.classList.contains('empty')) return;
+
+                if (selectedCell) {
+                    selectedCell.classList.remove('selected');
+                    if (selectedCell !== clickedCell && isAdjacent(parseInt(selectedCell.dataset.index), parseInt(clickedCell.dataset.index))) {
+                        if (isValidSwap(selectedCell, clickedCell)) {
+                            isProcessing = true;
+                            swapCells(selectedCell, clickedCell);
+                            findAndProcessMatches();
+                        } else {
+                            selectedCell.classList.add('invalid');
+                            clickedCell.classList.add('invalid');
+                            setTimeout(() => {
+                                selectedCell.classList.remove('invalid');
+                                clickedCell.classList.remove('invalid');
+                            }, 400);
+                        }
+                    }
+                    selectedCell = null;
+                } else {
+                    selectedCell = clickedCell;
+                    selectedCell.classList.add('selected');
+                }
+            }
+            
+            function findAllPhrasesOnBoard(boardState) {
+                const found = new Set();
+                for (const phrase of targetPhrases) {
+                    const phraseWords = phrase.split(' ');
+                    // Check horizontal
+                    for (let r = 0; r < config.height; r++) {
+                        for (let c = 0; c <= config.width - phraseWords.length; c++) {
+                            let potentialMatch = true;
+                            for (let k = 0; k < phraseWords.length; k++) {
+                                if (boardState[r * config.width + c + k] !== phraseWords[k]) { potentialMatch = false; break; }
+                            }
+                            if (potentialMatch) found.add(phrase);
+                        }
+                    }
+                    // Check vertical
+                    for (let c = 0; c < config.width; c++) {
+                        for (let r = 0; r <= config.height - phraseWords.length; r++) {
+                            let potentialMatch = true;
+                            for (let k = 0; k < phraseWords.length; k++) {
+                                if (boardState[(r + k) * config.width + c] !== phraseWords[k]) { potentialMatch = false; break; }
+                            }
+                            if (potentialMatch) found.add(phrase);
+                        }
+                    }
+                }
+                return found;
+            }
+
+            function isValidSwap(cell1, cell2) {
+                const currentBoardState = cells.map(c => c.textContent);
+                const phrasesBefore = findAllPhrasesOnBoard(currentBoardState);
+                const index1 = parseInt(cell1.dataset.index);
+                const index2 = parseInt(cell2.dataset.index);
+                const tempBoardState = [...currentBoardState];
+                [tempBoardState[index1], tempBoardState[index2]] = [tempBoardState[index2], tempBoardState[index1]];
+                const phrasesAfter = findAllPhrasesOnBoard(tempBoardState);
+                for (const phrase of phrasesAfter) {
+                    if (!phrasesBefore.has(phrase) && !foundPhrases.includes(phrase)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            function swapCells(cell1, cell2) {
+                const data1 = { word: cell1.textContent, color: cell1.style.backgroundColor, phrase: cell1.dataset.phrase };
+                const data2 = { word: cell2.textContent, color: cell2.style.backgroundColor, phrase: cell2.dataset.phrase };
+                updateCell(cell1, data2);
+                updateCell(cell2, data1);
+            }
+
+            function isAdjacent(index1, index2) {
+                const row1 = Math.floor(index1 / config.width);
+                const col1 = index1 % config.width;
+                const row2 = Math.floor(index2 / config.width);
+                const col2 = index2 % config.width;
+                return Math.abs(row1 - row2) + Math.abs(col1 - col2) === 1;
+            }
+            
+            function findAndProcessMatches() {
+                const currentBoardState = cells.map(c => c.textContent);
+                const allCurrentPhrases = findAllPhrasesOnBoard(currentBoardState);
+                const newMatches = [...allCurrentPhrases].filter(p => !foundPhrases.includes(p));
+
+                if (newMatches.length > 0) {
+                    const matchedIndices = new Set();
+                    newMatches.forEach(phrase => {
+                        foundPhrases.push(phrase);
+                        const phraseWords = phrase.split(' ');
+                        for (let r = 0; r < config.height; r++) {
+                            for (let c = 0; c <= config.width - phraseWords.length; c++) {
+                                let potentialMatch = true;
+                                for (let k = 0; k < phraseWords.length; k++) { if (cells[r * config.width + c + k].textContent !== phraseWords[k]) { potentialMatch = false; break; } }
+                                if(potentialMatch) for (let i = 0; i < phraseWords.length; i++) matchedIndices.add(r * config.width + c + i);
+                            }
+                        }
+                        for (let c = 0; c < config.width; c++) {
+                            for (let r = 0; r <= config.height - phraseWords.length; r++) {
+                                let potentialMatch = true;
+                                for (let k = 0; k < phraseWords.length; k++) { if (cells[(r + k) * config.width + c].textContent !== phraseWords[k]) { potentialMatch = false; break; } }
+                                if(potentialMatch) for (let i = 0; i < phraseWords.length; i++) matchedIndices.add((r + i) * config.width + c);
+                            }
+                        }
+                    });
+                    processMatchedCells(matchedIndices);
+                } else {
+                    isProcessing = false;
+                }
+            }
+            
+            function processMatchedCells(indices) {
+                indices.forEach(index => {
+                    cells[index].style.backgroundColor = '';
+                    cells[index].classList.add('matched');
+                });
+                foundPhrases.forEach(phrase => {
+                    const li = document.querySelector(`li[data-phrase="${phrase}"]`);
+                    if (li) li.classList.add('found');
+                });
+                
+                setTimeout(() => {
+                    indices.forEach(index => {
+                        updateCell(cells[index], null);
+                        cells[index].classList.remove('matched');
+                    });
+                    applyGravityAndRefill();
+                }, 3000);
+                checkForWin();
+            }
+
+            function applyGravityAndRefill() {
+                for (let c = 0; c < config.width; c++) {
+                    const columnData = [];
+                    for (let r = 0; r < config.height; r++) {
+                        const cell = cells[r * config.width + c];
+                        if (!cell.classList.contains('empty')) {
+                            columnData.push({ word: cell.textContent, color: cell.style.backgroundColor, phrase: cell.dataset.phrase });
+                        }
+                    }
+                    for (let r = 0; r < config.height; r++) { updateCell(cells[r * config.width + c], null); }
+                    let writeRow = config.height - 1;
+                    while(columnData.length > 0) {
+                        const cellData = columnData.pop();
+                        updateCell(cells[writeRow * config.width + c], cellData);
+                        writeRow--;
+                    }
+                }
+                cells.forEach(cell => {
+                    if (cell.classList.contains('empty')) {
+                        const randomWord = allWords[Math.floor(Math.random() * allWords.length)];
+                        const randomColor = colorPalette[Math.floor(Math.random() * colorPalette.length)];
+                        updateCell(cell, {word: randomWord, color: randomColor, phrase: null});
+                    }
+                });
+                setTimeout(findAndProcessMatches, 200);
+            }
+
+            function checkForWin() {
+                if (foundPhrases.length === targetPhrases.length) {
+                    clearTimeout(hintTimer);
+                    winMessage.style.display = 'flex';
+                    launchFireworks();
+                }
+            }
+            
+            function launchFireworks() {
+                var duration = 5 * 1000;
+                var animationEnd = Date.now() + duration;
+                var defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 1001 };
+                function randomInRange(min, max) { return Math.random() * (max - min) + min; }
+                var interval = setInterval(function() {
+                    var timeLeft = animationEnd - Date.now();
+                    if (timeLeft <= 0) return clearInterval(interval);
+                    var particleCount = 50 * (timeLeft / duration);
+                    confetti(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } }));
+                    confetti(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } }));
+                }, 250);
+            }
+            
+            function handleWinClick() {
+                const playAgain = confirm("Bạn có muốn chơi lại không?");
+                if (playAgain) {
+                    resetGame();
+                } else {
+                    window.close();
+                }
+            }
+
+            init();
+        });
+    </script>
+</body>
+</html>
